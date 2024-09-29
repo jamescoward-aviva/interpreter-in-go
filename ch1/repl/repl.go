@@ -21,9 +21,7 @@ func Start(in io.Reader, out io.Writer) {
 
 		line := scanner.Text()
 
-		tokens := flexer.Flex(line)
-
-		for _, tok := range tokens {
+		for _, tok := range flexer.Flex(line) {
 			fmt.Fprintf(out, "%+v\n", tok)
 		}
 	}

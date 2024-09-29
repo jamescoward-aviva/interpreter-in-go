@@ -1,6 +1,9 @@
 package flexer
 
-import "monkey/token"
+import (
+	"iter"
+	"monkey/token"
+)
 
 const (
 	EofByte = 0
@@ -55,78 +58,49 @@ func skipWhitespace(position int, input string) string {
 	return input[position:]
 }
 
-func NextToken(input string) (string, token.Token) {
-	var tok token.Token
+func nextToken(input string) (string, token.Token) {
 	position := 0
 	input = skipWhitespace(position, input)
 
 	char := peakChar(position, input)
-	switch char {
-	case '=':
-		readPosition := position + 1
-		if peakChar(readPosition, input) == '=' {
-			input, _ = readChar(readPosition, input)
-			tok = newStringToken(token.EQ, "==")
-		} else {
-			input, tok = readCharAndGetToken(position, input, token.ASSIGN)
-		}
-	case '+':
-		input, tok = readCharAndGetToken(position, input, token.PLUS)
-	case '-':
-		input, tok = readCharAndGetToken(position, input, token.MINUS)
-	case '!':
-		readPosition := position + 1
-		if peakChar(readPosition, input) == '=' {
-			input, _ = readChar(readPosition, input)
-			tok = newStringToken(token.NOT_EQ, "!=")
-		} else {
-			input, tok = readCharAndGetToken(position, input, token.BANG)
-		}
-	case '/':
-		input, tok = readCharAndGetToken(position, input, token.SLASH)
-	case '*':
-		input, tok = readCharAndGetToken(position, input, token.ASTERISK)
-	case '<':
-		input, tok = readCharAndGetToken(position, input, token.LT)
-	case '>':
-		input, tok = readCharAndGetToken(position, input, token.GT)
-	case ';':
-		input, tok = readCharAndGetToken(position, input, token.SEMICOLON)
-	case '(':
-		input, tok = readCharAndGetToken(position, input, token.LPAREN)
-	case ')':
-		input, tok = readCharAndGetToken(position, input, token.RPAREN)
-	case '{':
-		input, tok = readCharAndGetToken(position, input, token.LBRACE)
-	case '}':
-		input, tok = readCharAndGetToken(position, input, token.RBRACE)
-	case ',':
-		input, tok = readCharAndGetToken(position, input, token.COMMA)
-	case EofByte:
-		tok = newStringToken(token.EOF, "")
-	default:
-		var literal string
-		if isLetter(char) {
-			input, literal = readIdentifier(position, input)
-			tok = newLiteralToken(token.LookupIdent(literal), literal)
-		} else if isDigit(char) {
-			input, literal = readNumber(position, input)
-			tok = newLiteralToken(token.INT, literal)
-		} else {
-			input, tok = readCharAndGetToken(position, input, token.ILLEGAL)
-		}
+
+	if char == EofByte { // EOF
+		return "", newEofToken()
 	}
 
-	return input, tok
+	if ok, input, tok := getDoubleToken(char, position, input); ok {
+		return input, tok
+	}
+
+	if ok, input, tok := getUnitToken(input); ok {
+		return input, tok
+	}
+
+	if isLetter(char) {
+		input, literal := readIdentifier(position, input)
+		return input, newLiteralToken(token.LookupIdent(literal), literal)
+	}
+
+	if isDigit(char) {
+		input, literal := readNumber(position, input)
+		return input, newLiteralToken(token.INT, literal)
+	}
+
+	return input, newToken(token.ILLEGAL, char)
 
 }
 
-func Flex(input string) []token.Token {
-	var tokens []token.Token
-	for input, tok := NextToken(input); tok.Type != token.EOF; input, tok = NextToken(input) {
-		tokens = append(tokens, tok)
+func Flex(input string) iter.Seq2[string, token.Token] {
+	return func(yield func(string, token.Token) bool) {
+		for {
+			var tok token.Token
+			input, tok = nextToken(input)
+
+			if !yield(input, tok) || tok.Type == token.EOF || tok.Type == token.ILLEGAL {
+				break
+			}
+		}
 	}
-	return tokens
 }
 
 func readCharAndGetToken(position int, input string, tt token.TokenType) (string, token.Token) {
@@ -140,6 +114,42 @@ func newToken(tokenType token.TokenType, ch byte) token.Token {
 
 func newStringToken(tokenType token.TokenType, s string) token.Token {
 	return token.Token{Type: tokenType, Literal: s}
+}
+
+func newEofToken() token.Token {
+	return token.Token{Type: token.EOF, Literal: ""}
+}
+
+func getDoubleToken(ch byte, position int, input string) (bool, string, token.Token) {
+	readPosition := position + 1
+	double := string(ch) + string(peakChar(readPosition, input))
+	found := true
+	var tok token.Token
+
+	if double == "==" {
+		input, _ = readChar(readPosition, input)
+		tok = newStringToken(token.EQ, double)
+		return found, input, tok
+	} else if double == "!=" {
+		input, _ = readChar(readPosition, input)
+		tok = newStringToken(token.NOT_EQ, double)
+		return found, input, tok
+	} else {
+		found = false
+		return found, input, tok
+	}
+
+}
+
+func getUnitToken(input string) (bool, string, token.Token) {
+	position := 0
+	newInput, char := readChar(position, input)
+
+	if unitToken, ok := unitTokens[char]; ok {
+		return true, newInput, unitToken
+	} else {
+		return false, input, token.Token{}
+	}
 }
 
 func newLiteralToken(tokenType token.TokenType, literal string) token.Token {
