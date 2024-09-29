@@ -10,7 +10,7 @@ import (
 
 func TestNextToken(t *testing.T) {
 	tests := map[string]struct {
-		input    string
+		input    Input
 		expected []token.Token
 	}{
 		"bad token": {
@@ -198,7 +198,7 @@ if (5 < 10) {
 
 			// when
 			var result []token.Token
-			for _, tok := range Flex(tt.input) {
+			for tok, _ := range Flex(tt.input) {
 				result = append(result, tok)
 			}
 

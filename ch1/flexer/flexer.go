@@ -9,103 +9,100 @@ const (
 	EofByte = 0
 )
 
+type Input string
+
 // pure function implementation of Lexer.readChar()
-func readChar(position int, input string) (string, byte) {
-	if position >= len(input) {
-		return "", EofByte
-	} else {
-		char := input[position]
-		position++
-		return input[position:], char
+func readChar(input Input) (byte, Input) {
+	if len(input) == 0 {
+		return EofByte, ""
 	}
+
+	return input[0], input[1:]
 }
 
-func peakChar(postion int, input string) byte {
-	if postion >= len(input) {
+func peakChar(input Input) byte {
+	if len(input) == 0 {
 		return EofByte
 	} else {
-		return input[postion]
+		return input[0]
 	}
 }
 
-func readIdentifier(position int, input string) (string, string) {
-	return readToken(position, input, isLetter)
+func readIdentifier(input Input) (string, Input) {
+	return readToken(input, isLetter)
 }
 
-func readNumber(position int, input string) (string, string) {
-	return readToken(position, input, isDigit)
+func readNumber(input Input) (string, Input) {
+	return readToken(input, isDigit)
 }
 
 // generic implementation of readNumber or readIdentifier
-func readToken(position int, input string, isType func(byte) bool) (string, string) {
-	readPosition := position
+func readToken(input Input, isType func(byte) bool) (string, Input) {
+	readPosition := 0
 	for isType(input[readPosition]) {
 		readPosition++
 	}
-	return input[readPosition:], input[:readPosition]
+	return string(input[:readPosition]), input[readPosition:]
 }
 
-func skipWhitespace(position int, input string) string {
-	if position >= len(input) {
+func skipWhitespace(input Input) Input {
+	if len(input) == 0 {
 		return ""
 	}
 
-	ch := peakChar(position, input)
+	ch := peakChar(input)
+
 	for isWhitespace(ch) {
-		position++
-		ch = peakChar(position, input)
+		// Consume the peaked character
+		_, input = readChar(input)
+		ch = peakChar(input)
 	}
-	return input[position:]
+
+	return input
 }
 
-func nextToken(input string) (string, token.Token) {
-	position := 0
-	input = skipWhitespace(position, input)
+func nextToken(input Input) (token.Token, Input) {
+	input = skipWhitespace(input)
 
-	char := peakChar(position, input)
+	ch := peakChar(input)
 
-	if char == EofByte { // EOF
-		return "", newEofToken()
+	if ch == EofByte { // EOF
+		return newEofToken(), ""
 	}
 
-	if ok, input, tok := getDoubleToken(char, position, input); ok {
-		return input, tok
+	if ok, input, tok := getDoubleToken(input); ok {
+		return tok, input
 	}
 
 	if ok, input, tok := getUnitToken(input); ok {
-		return input, tok
+		return tok, input
 	}
 
-	if isLetter(char) {
-		input, literal := readIdentifier(position, input)
-		return input, newLiteralToken(token.LookupIdent(literal), literal)
+	if isLetter(ch) {
+		literal, input := readIdentifier(input)
+		return newLiteralToken(token.LookupIdent(literal), literal), input
 	}
 
-	if isDigit(char) {
-		input, literal := readNumber(position, input)
-		return input, newLiteralToken(token.INT, literal)
+	if isDigit(ch) {
+		literal, input := readNumber(input)
+		return newLiteralToken(token.INT, literal), input
 	}
 
-	return input, newToken(token.ILLEGAL, char)
+	return newToken(token.ILLEGAL, ch), input
 
 }
 
-func Flex(input string) iter.Seq2[string, token.Token] {
-	return func(yield func(string, token.Token) bool) {
+func Flex(input Input) iter.Seq2[token.Token, Input] {
+	return func(yield func(token.Token, Input) bool) {
 		for {
 			var tok token.Token
-			input, tok = nextToken(input)
+			tok, input = nextToken(input)
 
-			if !yield(input, tok) || tok.Type == token.EOF || tok.Type == token.ILLEGAL {
+			if !yield(tok, input) || tok.Type == token.EOF || tok.Type == token.ILLEGAL {
 				break
 			}
 		}
 	}
-}
-
-func readCharAndGetToken(position int, input string, tt token.TokenType) (string, token.Token) {
-	input, char := readChar(position, input)
-	return input, newToken(tt, char)
 }
 
 func newToken(tokenType token.TokenType, ch byte) token.Token {
@@ -120,36 +117,39 @@ func newEofToken() token.Token {
 	return token.Token{Type: token.EOF, Literal: ""}
 }
 
-func getDoubleToken(ch byte, position int, input string) (bool, string, token.Token) {
-	readPosition := position + 1
-	double := string(ch) + string(peakChar(readPosition, input))
+func getDoubleToken(input Input) (bool, Input, token.Token) {
+	var ch1, ch2 byte
+	var readInput Input
+	ch1, readInput = readChar(input)
+	ch2, readInput = readChar(readInput)
+	double := string(ch1) + string(ch2)
 	found := true
 	var tok token.Token
 
 	if double == "==" {
-		input, _ = readChar(readPosition, input)
 		tok = newStringToken(token.EQ, double)
-		return found, input, tok
-	} else if double == "!=" {
-		input, _ = readChar(readPosition, input)
-		tok = newStringToken(token.NOT_EQ, double)
-		return found, input, tok
-	} else {
-		found = false
-		return found, input, tok
+		return found, readInput, tok
 	}
+
+	if double == "!=" {
+		tok = newStringToken(token.NOT_EQ, double)
+		return found, readInput, tok
+	}
+
+	// If no double token is found, return the input as is
+	found = false
+	return found, input, tok
 
 }
 
-func getUnitToken(input string) (bool, string, token.Token) {
-	position := 0
-	newInput, char := readChar(position, input)
-
-	if unitToken, ok := unitTokens[char]; ok {
-		return true, newInput, unitToken
-	} else {
-		return false, input, token.Token{}
+func getUnitToken(input Input) (bool, Input, token.Token) {
+	ch, readInput := readChar(input)
+	if unitToken, ok := unitTokens[ch]; ok {
+		return true, readInput, unitToken
 	}
+
+	// If no unit token is found, return the input as is
+	return false, input, token.Token{}
 }
 
 func newLiteralToken(tokenType token.TokenType, literal string) token.Token {
